@@ -1,0 +1,62 @@
+/**
+ * Tipos compartidos entre scrapers, sheets writer y notifier.
+ */
+
+export type Source = 'flippa' | 'bizscout';
+
+/**
+ * Schema unificado de un listing en el tab Scraper_Inflow.
+ * Los campos que no aplican a una fuente quedan como null/empty string
+ * (NO 'N/D' — para no romper filtros numéricos).
+ */
+export interface NormalizedListing {
+  source: Source;
+  listing_id: string;
+  title: string;
+  asking_price: number | null;
+  monthly_profit: number | null;
+  monthly_revenue: number | null;
+  multiple_years: number | null;
+  location: string;
+  category: string;
+  age_years: number | null;
+  status: string;
+  url: string;
+  broker_name: string;
+  broker_email: string;
+  broker_phone: string;
+  /** Compact JSON con el payload original — útil para auditar / agregar campos. */
+  raw_json: string;
+}
+
+/**
+ * Estado por listing en la Sheet (después del dedup).
+ */
+export interface ListingRow extends NormalizedListing {
+  first_seen_at: string; // ISO timestamp
+  last_seen_at: string;  // ISO timestamp
+  /** true = Task 2 (NDA review) aún no procesó esta fila */
+  needs_nda_review: boolean;
+  /** true cuando Task 3 firmó el NDA */
+  nda_signed: boolean;
+}
+
+export interface ScraperResult {
+  source: Source;
+  listings: NormalizedListing[];
+  /** Cuántos requests HTTP hizo (para anti-ban awareness) */
+  requestCount: number;
+  /** ms */
+  durationMs: number;
+}
+
+export interface RunLogEntry {
+  timestamp: string;
+  source: Source;
+  duration_seconds: number;
+  listings_total: number;
+  listings_new: number;
+  listings_updated: number;
+  status: 'success' | 'error';
+  error_message: string;
+}

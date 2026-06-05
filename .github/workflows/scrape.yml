@@ -1,0 +1,44 @@
+name: Scrape
+
+on:
+  # Diario a las 7:00 UTC (≈ 3 AM US ET en horario de verano)
+  schedule:
+    - cron: '0 7 * * *'
+  # Trigger manual desde la UI de GitHub
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Source a scrapear (flippa, all)'
+        required: false
+        default: 'all'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run scraper
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          FLIPPA_EMAIL: ${{ secrets.FLIPPA_EMAIL }}
+          FLIPPA_PASSWORD: ${{ secrets.FLIPPA_PASSWORD }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+        run: npx tsx src/index.ts ${{ github.event.inputs.source || 'all' }}
