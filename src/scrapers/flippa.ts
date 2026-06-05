@@ -93,33 +93,68 @@ export async function scrapeFlippa(): Promise<ScraperResult> {
 async function loginFlippa(context: BrowserContext): Promise<void> {
   const page = await context.newPage();
   log.info('Flippa: navegando a login');
-  await page.goto(FLIPPA_LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await humanDelay();
+  await page.goto(FLIPPA_LOGIN_URL, { waitUntil: 'networkidle', timeout: 45_000 });
+  await humanDelay(1500, 3000);
 
-  // Detectar el form de login. Flippa usa email + password inputs estándar.
-  // Selectores probables — si Flippa los cambia, hay que actualizarlos acá.
-  const emailInput = page.locator('input[type="email"], input[name="email"], #user_email').first();
-  const passwordInput = page.locator('input[type="password"], input[name="password"], #user_password').first();
+  // Selectores múltiples — Flippa usa Rails convention `user[email]` + variantes.
+  const emailSelector =
+    'input[type="email"], input[name="email"], input[name="user[email]"], ' +
+    '#user_email, #email, input[autocomplete="email"], input[placeholder*="email" i]';
+  const passwordSelector =
+    'input[type="password"], input[name="password"], input[name="user[password]"], ' +
+    '#user_password, #password, input[autocomplete="current-password"]';
 
-  await emailInput.waitFor({ timeout: 10_000 });
+  const emailInput = page.locator(emailSelector).first();
+  const passwordInput = page.locator(passwordSelector).first();
+
+  try {
+    await emailInput.waitFor({ state: 'visible', timeout: 30_000 });
+  } catch (err) {
+    await dumpDebug(page, 'login-no-email-input');
+    throw new Error(
+      'Flippa login: input de email no apareció en 30s. ' +
+      'Posible Cloudflare challenge o cambio de UI. Ver screenshot en artifacts.'
+    );
+  }
+
   await emailInput.fill(CONFIG.flippa.email!);
   await humanDelay(400, 1200);
   await passwordInput.fill(CONFIG.flippa.password!);
   await humanDelay(400, 1200);
 
-  // Submit
-  const submitBtn = page.locator('button[type="submit"], input[type="submit"]').first();
+  const submitBtn = page
+    .locator('button[type="submit"], input[type="submit"], button:has-text("Sign in"), button:has-text("Log in")')
+    .first();
   await submitBtn.click();
 
-  // Wait for navigation or some logged-in indicator
   try {
-    await page.waitForURL((url) => !url.toString().includes('/login'), { timeout: 20_000 });
+    await page.waitForURL((url) => !url.toString().includes('/login'), { timeout: 30_000 });
     log.info(`Flippa: login OK, URL actual: ${page.url()}`);
   } catch {
-    throw new Error('Flippa: login no completó (URL sigue en /login). ¿Password incorrecto, 2FA, captcha?');
+    await dumpDebug(page, 'login-no-redirect');
+    throw new Error(
+      'Flippa login: URL sigue en /login tras submit. ¿Password incorrecto, 2FA, captcha?'
+    );
   }
 
   await page.close();
+}
+
+/** Guarda screenshot + HTML para debug. En GH Actions se sube como artifact. */
+async function dumpDebug(page: import('playwright').Page, label: string): Promise<void> {
+  try {
+    const dir = process.env.GITHUB_WORKSPACE || '.';
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const debugDir = path.join(dir, 'debug');
+    await fs.mkdir(debugDir, { recursive: true });
+    await page.screenshot({ path: path.join(debugDir, `${label}.png`), fullPage: true });
+    const html = await page.content();
+    await fs.writeFile(path.join(debugDir, `${label}.html`), html);
+    log.warn(`Debug guardado en debug/${label}.{png,html}`);
+  } catch (e) {
+    log.warn('No se pudo guardar debug', { err: String(e) });
+  }
 }
 
 async function fetchAllListings(
