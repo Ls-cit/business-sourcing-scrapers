@@ -32,13 +32,33 @@ export interface NormalizedListing {
 /**
  * Estado por listing en la Sheet (después del dedup).
  */
+export type NdaVerdict = 'GREEN' | 'YELLOW' | 'RED' | '';
+
 export interface ListingRow extends NormalizedListing {
   first_seen_at: string; // ISO timestamp
   last_seen_at: string;  // ISO timestamp
   /** true = Task 2 (NDA review) aún no procesó esta fila */
   needs_nda_review: boolean;
+  /** GREEN/YELLOW/RED del análisis del NDA (vacío si todavía no se analizó) */
+  nda_verdict: NdaVerdict;
+  /** Resumen del análisis (cláusulas notables, racional) */
+  nda_analysis: string;
+  /** ISO timestamp del review */
+  nda_review_date: string;
   /** true cuando Task 3 firmó el NDA */
   nda_signed: boolean;
+  /** ISO timestamp de la firma */
+  nda_signed_at: string;
+  /** Draft del email de pushback (si verdict 🟡/🔴) — se manda a codingit5 */
+  nda_pushback_email: string;
+}
+
+/** Resultado del análisis NDA (lo que devuelve Anthropic API parseado). */
+export interface NdaReviewResult {
+  verdict: NdaVerdict;
+  rationale: string;
+  clauses_notable: Array<{ clause: string; classification: string; note: string }>;
+  pushback_email: string; // vacío si verdict es GREEN
 }
 
 export interface ScraperResult {

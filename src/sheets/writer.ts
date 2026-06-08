@@ -17,27 +17,34 @@ import { log } from '../utils/log.js';
 import type { NormalizedListing, ListingRow, RunLogEntry, Source } from '../types.js';
 
 const INFLOW_HEADERS = [
-  'source',
-  'listing_id',
-  'title',
-  'asking_price',
-  'monthly_profit',
-  'monthly_revenue',
-  'multiple_years',
-  'location',
-  'category',
-  'age_years',
-  'status',
-  'url',
-  'broker_name',
-  'broker_email',
-  'broker_phone',
-  'first_seen_at',
-  'last_seen_at',
-  'needs_nda_review',
-  'nda_signed',
-  'raw_json',
+  'source',            // A
+  'listing_id',        // B
+  'title',             // C
+  'asking_price',      // D
+  'monthly_profit',    // E
+  'monthly_revenue',   // F
+  'multiple_years',    // G
+  'location',          // H
+  'category',          // I
+  'age_years',         // J
+  'status',            // K
+  'url',               // L
+  'broker_name',       // M
+  'broker_email',      // N
+  'broker_phone',      // O
+  'first_seen_at',     // P
+  'last_seen_at',      // Q
+  'needs_nda_review',  // R
+  'nda_verdict',       // S
+  'nda_analysis',      // T
+  'nda_review_date',   // U
+  'nda_signed',        // V
+  'nda_signed_at',     // W
+  'nda_pushback_email',// X
+  'raw_json',          // Y
 ] as const;
+
+const INFLOW_LAST_COL = 'Y'; // 25 columnas
 
 const RUN_LOG_HEADERS = [
   'timestamp',
@@ -114,9 +121,9 @@ async function getSheetIdByName(tabName: string): Promise<number> {
 }
 
 /** Lee TODO el tab Scraper_Inflow e indexa por (source, listing_id). */
-async function readInflow(): Promise<Map<string, { rowIndex: number; row: ListingRow }>> {
+export async function readInflow(): Promise<Map<string, { rowIndex: number; row: ListingRow }>> {
   const sheets = getSheetsClient();
-  const range = `${CONFIG.sheets.tabInflow}!A2:T`;
+  const range = `${CONFIG.sheets.tabInflow}!A2:${INFLOW_LAST_COL}`;
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId: CONFIG.sheets.spreadsheetId,
     range,
@@ -154,8 +161,13 @@ function rowArrayToObject(r: any[]): ListingRow {
     first_seen_at: String(get(15)),
     last_seen_at: String(get(16)),
     needs_nda_review: String(get(17)).toUpperCase() === 'TRUE',
-    nda_signed: String(get(18)).toUpperCase() === 'TRUE',
-    raw_json: String(get(19)),
+    nda_verdict: (String(get(18)) as ListingRow['nda_verdict']) || '',
+    nda_analysis: String(get(19)),
+    nda_review_date: String(get(20)),
+    nda_signed: String(get(21)).toUpperCase() === 'TRUE',
+    nda_signed_at: String(get(22)),
+    nda_pushback_email: String(get(23)),
+    raw_json: String(get(24)),
   };
 }
 
@@ -179,7 +191,12 @@ function rowObjectToArray(row: ListingRow): any[] {
     row.first_seen_at,
     row.last_seen_at,
     row.needs_nda_review ? 'TRUE' : 'FALSE',
+    row.nda_verdict || '',
+    row.nda_analysis || '',
+    row.nda_review_date || '',
     row.nda_signed ? 'TRUE' : 'FALSE',
+    row.nda_signed_at || '',
+    row.nda_pushback_email || '',
     row.raw_json,
   ];
 }
@@ -217,16 +234,25 @@ export async function upsertListings(listings: NormalizedListing[]): Promise<Ups
         first_seen_at: now,
         last_seen_at: now,
         needs_nda_review: true,
+        nda_verdict: '',
+        nda_analysis: '',
+        nda_review_date: '',
         nda_signed: false,
+        nda_signed_at: '',
+        nda_pushback_email: '',
       });
     } else {
-      // UPDATE — solo campos que pueden cambiar entre corridas
+      // UPDATE — preserva todo lo de NDA flow + first_seen_at; refresca data scrapeada.
       const updated: ListingRow = {
         ...found.row,
-        // Preservar inputs históricos
         first_seen_at: found.row.first_seen_at,
         needs_nda_review: found.row.needs_nda_review,
+        nda_verdict: found.row.nda_verdict,
+        nda_analysis: found.row.nda_analysis,
+        nda_review_date: found.row.nda_review_date,
         nda_signed: found.row.nda_signed,
+        nda_signed_at: found.row.nda_signed_at,
+        nda_pushback_email: found.row.nda_pushback_email,
         // Refrescar datos que pueden haber cambiado
         title: listing.title,
         asking_price: listing.asking_price,
@@ -245,7 +271,7 @@ export async function upsertListings(listings: NormalizedListing[]): Promise<Ups
         last_seen_at: now,
       };
       updates.push({
-        range: `${CONFIG.sheets.tabInflow}!A${found.rowIndex}:T${found.rowIndex}`,
+        range: `${CONFIG.sheets.tabInflow}!A${found.rowIndex}:${INFLOW_LAST_COL}${found.rowIndex}`,
         values: [rowObjectToArray(updated)],
       });
     }
@@ -277,6 +303,57 @@ export async function upsertListings(listings: NormalizedListing[]): Promise<Ups
     updated: updates.length,
     total: listings.length,
   };
+}
+
+/**
+ * Devuelve filas que necesitan NDA review (needs_nda_review=TRUE y nda_verdict vacío).
+ */
+export async function getListingsPendingNdaReview(): Promise<Array<{ rowIndex: number; row: ListingRow }>> {
+  const all = await readInflow();
+  const pending: Array<{ rowIndex: number; row: ListingRow }> = [];
+  for (const entry of all.values()) {
+    if (entry.row.needs_nda_review && !entry.row.nda_verdict) {
+      pending.push(entry);
+    }
+  }
+  return pending;
+}
+
+/**
+ * Actualiza solo los campos NDA de una fila específica (no toca el resto).
+ */
+export interface NdaFieldsUpdate {
+  nda_verdict: ListingRow['nda_verdict'];
+  nda_analysis: string;
+  nda_review_date: string;
+  nda_signed: boolean;
+  nda_signed_at: string;
+  nda_pushback_email: string;
+  /** Cuando review + sign están completos, lo bajamos a FALSE para no re-procesar */
+  needs_nda_review: boolean;
+}
+
+export async function updateNdaFields(
+  rowIndex: number,
+  updates: NdaFieldsUpdate
+): Promise<void> {
+  const sheets = getSheetsClient();
+  // Cols R..X (needs_nda_review hasta nda_pushback_email)
+  const values = [[
+    updates.needs_nda_review ? 'TRUE' : 'FALSE',
+    updates.nda_verdict || '',
+    updates.nda_analysis || '',
+    updates.nda_review_date || '',
+    updates.nda_signed ? 'TRUE' : 'FALSE',
+    updates.nda_signed_at || '',
+    updates.nda_pushback_email || '',
+  ]];
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: CONFIG.sheets.spreadsheetId,
+    range: `${CONFIG.sheets.tabInflow}!R${rowIndex}:X${rowIndex}`,
+    valueInputOption: 'RAW',
+    requestBody: { values },
+  });
 }
 
 /** Agrega una fila al Run_Log. */

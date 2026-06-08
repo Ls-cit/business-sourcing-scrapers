@@ -7,10 +7,10 @@ on:
   # Trigger manual desde la UI de GitHub
   workflow_dispatch:
     inputs:
-      source:
-        description: 'Source a scrapear (flippa, all)'
+      command:
+        description: 'Comando (flippa | all | nda | pipeline)'
         required: false
-        default: 'all'
+        default: 'pipeline'
 
 jobs:
   scrape:
@@ -41,7 +41,8 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
-        run: npx tsx src/index.ts ${{ github.event.inputs.source || 'all' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npx tsx src/index.ts ${{ github.event.inputs.command || 'pipeline' }}
 
       - name: Upload debug artifacts on failure
         if: failure()

@@ -108,7 +108,7 @@ export async function scrapeFlippa(): Promise<ScraperResult> {
   }
 }
 
-async function loginFlippa(context: BrowserContext): Promise<void> {
+export async function loginFlippa(context: BrowserContext): Promise<void> {
   const page = await context.newPage();
   log.info('Flippa: navegando a login');
   await page.goto(FLIPPA_LOGIN_URL, { waitUntil: 'networkidle', timeout: 45_000 });

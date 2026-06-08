@@ -1,20 +1,24 @@
 /**
- * Entry point — orquesta el scrapeo por source y la persistencia en Sheets.
+ * Entry point — orquesta el scrapeo, review de NDAs y firma automática.
  *
  * Uso:
- *   tsx src/index.ts flippa       # solo Flippa
- *   tsx src/index.ts all          # todos los configurados (hoy solo flippa)
+ *   tsx src/index.ts flippa       # solo scrape Task 1 (Flippa)
+ *   tsx src/index.ts all          # scrape todos los configurados
+ *   tsx src/index.ts nda          # solo Task 2 + 3 (review + sign de NDAs pendientes)
+ *   tsx src/index.ts pipeline     # Task 1 + Task 2 + Task 3 (corrida completa)
  *
  * Output:
  *   - Upsert listings al tab Scraper_Inflow
+ *   - Update NDA fields per-listing
  *   - Append fila al tab Run_Log
- *   - Si N corridas seguidas fallaron → email
+ *   - Email de pushback (per listing 🟡/🔴) + email de alerta si N fails seguidos
  *   - Exit code 0 si todo OK, 1 si error
  */
 
 import { scrapeFlippa } from './scrapers/flippa.js';
 import { upsertListings, appendRunLog } from './sheets/writer.js';
 import { maybeNotifyFailure } from './notify/email.js';
+import { processNdaQueue } from './nda/process.js';
 import { log } from './utils/log.js';
 import type { Source, ScraperResult, RunLogEntry } from './types.js';
 
@@ -24,7 +28,6 @@ interface ScraperFn {
 
 const SCRAPERS: Record<Source, ScraperFn> = {
   flippa: scrapeFlippa,
-  // bizscout: scrapeBizScout, // TODO: módulo 2
   bizscout: () => { throw new Error('BizScout aún no implementado'); },
 };
 
@@ -71,36 +74,49 @@ async function runOne(source: Source): Promise<{ ok: boolean; message: string }>
       status: 'error',
       error_message: errMsg,
     };
-    try {
-      await appendRunLog(entry);
-    } catch (logErr) {
-      log.error('No se pudo escribir en Run_Log tampoco', logErr);
-    }
-    try {
-      await maybeNotifyFailure(source, errMsg);
-    } catch (notifyErr) {
-      log.error('Falló el notify por email', notifyErr);
-    }
+    try { await appendRunLog(entry); } catch (e) { log.error('append run log failed', e); }
+    try { await maybeNotifyFailure(source, errMsg); } catch (e) { log.error('notify failed', e); }
+    return { ok: false, message: errMsg };
+  }
+}
+
+async function runNdaPipeline(): Promise<{ ok: boolean; message: string }> {
+  const t0 = Date.now();
+  try {
+    log.info(`=== NDA pipeline START ===`);
+    const result = await processNdaQueue();
+    const dur = Math.round((Date.now() - t0) / 1000);
+    log.info(`=== NDA pipeline OK — ${dur}s — ${JSON.stringify(result)} ===`);
+    return { ok: true, message: '' };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    log.error('NDA pipeline failed', err);
     return { ok: false, message: errMsg };
   }
 }
 
 async function main() {
-  const arg = process.argv[2] || 'all';
-  const sources: Source[] =
-    arg === 'all'
-      ? ['flippa'] // ampliar cuando se sume bizscout
-      : (arg.split(',') as Source[]);
-
+  const arg = process.argv[2] || 'pipeline';
   let anyFailed = false;
-  for (const src of sources) {
-    if (!(src in SCRAPERS)) {
-      log.error(`Source desconocida: ${src}`);
-      anyFailed = true;
-      continue;
+
+  if (arg === 'nda') {
+    const r = await runNdaPipeline();
+    if (!r.ok) anyFailed = true;
+  } else if (arg === 'pipeline' || arg === 'all' || arg === 'flippa') {
+    // Sources scope
+    const sources: Source[] = arg === 'flippa' ? ['flippa'] : ['flippa']; // ampliar cuando se sume bizscout
+    for (const src of sources) {
+      const { ok } = await runOne(src);
+      if (!ok) anyFailed = true;
     }
-    const { ok } = await runOne(src);
-    if (!ok) anyFailed = true;
+    // Pipeline runs NDA processing después del scraping
+    if (arg === 'pipeline') {
+      const r = await runNdaPipeline();
+      if (!r.ok) anyFailed = true;
+    }
+  } else {
+    log.error(`Comando desconocido: ${arg}. Usá: flippa | all | nda | pipeline`);
+    process.exit(2);
   }
 
   process.exit(anyFailed ? 1 : 0);

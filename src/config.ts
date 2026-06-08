@@ -42,6 +42,37 @@ export const CONFIG = {
     failuresBeforeAlert: 2,
   },
 
+  // Anthropic API para análisis automatizado de NDAs (Task 2)
+  anthropic: {
+    apiKey: opt('ANTHROPIC_API_KEY'),
+    // Sonnet 4.6 — balance costo/calidad para revisión legal
+    model: 'claude-sonnet-4-6',
+    maxTokens: 4000,
+  },
+
+  // Datos canónicos para llenar NDAs (decisión: signer Francisco, contact codingit5)
+  buyer: {
+    companyName: 'CodingIT LLC',
+    companyType: 'Limited Liability Company',
+    address: '710 Arrow Point Dr, Unit 30',
+    city: 'Cedar Park',
+    state: 'Texas',
+    stateAbbr: 'TX',
+    zip: '78613',
+    country: 'United States',
+    website: 'https://codingit.dev',
+    industry: 'Nearshore software development services and strategic acquisitions',
+    // Signer
+    signerFirstName: 'Francisco',
+    signerLastName: 'Rico',
+    signerFullName: 'Francisco Javier Rico',
+    signerTitle: 'Head of M&A and Strategic Growth',
+    signerPhone: '+1 512 640-5758',
+    // Email del NDA → codingit5 para aislamiento del dominio (decisión 2026-06)
+    signerEmail: 'codingit5@gmail.com',
+    linkedin: 'https://www.linkedin.com/in/francisco-rico',
+  },
+
   // Behavior
   isCi: process.env.GITHUB_ACTIONS === 'true',
 };
