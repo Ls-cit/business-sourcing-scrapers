@@ -320,6 +320,21 @@ export async function getListingsPendingNdaReview(): Promise<Array<{ rowIndex: n
 }
 
 /**
+ * Devuelve filas con verdict=GREEN que aún NO firmamos.
+ * Útil para el comando `sign-greens` (después de un dry-run).
+ */
+export async function getListingsPendingNdaSign(): Promise<Array<{ rowIndex: number; row: ListingRow }>> {
+  const all = await readInflow();
+  const pending: Array<{ rowIndex: number; row: ListingRow }> = [];
+  for (const entry of all.values()) {
+    if (entry.row.nda_verdict === 'GREEN' && !entry.row.nda_signed) {
+      pending.push(entry);
+    }
+  }
+  return pending;
+}
+
+/**
  * Actualiza solo los campos NDA de una fila específica (no toca el resto).
  */
 export interface NdaFieldsUpdate {

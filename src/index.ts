@@ -18,7 +18,7 @@
 import { scrapeFlippa } from './scrapers/flippa.js';
 import { upsertListings, appendRunLog } from './sheets/writer.js';
 import { maybeNotifyFailure } from './notify/email.js';
-import { processNdaQueue } from './nda/process.js';
+import { processNdaQueue, processSignPendingGreens } from './nda/process.js';
 import { log } from './utils/log.js';
 import type { Source, ScraperResult, RunLogEntry } from './types.js';
 
@@ -102,6 +102,15 @@ async function main() {
   if (arg === 'nda') {
     const r = await runNdaPipeline();
     if (!r.ok) anyFailed = true;
+  } else if (arg === 'sign-greens') {
+    try {
+      log.info('=== sign-greens START ===');
+      const r = await processSignPendingGreens();
+      log.info(`=== sign-greens OK — ${JSON.stringify(r)} ===`);
+    } catch (err) {
+      log.error('sign-greens failed', err);
+      anyFailed = true;
+    }
   } else if (arg === 'pipeline' || arg === 'all' || arg === 'flippa') {
     // Sources scope
     const sources: Source[] = arg === 'flippa' ? ['flippa'] : ['flippa']; // ampliar cuando se sume bizscout

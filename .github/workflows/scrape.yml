@@ -8,9 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: 'Comando (flippa | all | nda | pipeline)'
+        description: 'Comando (flippa | nda | sign-greens | pipeline)'
         required: false
         default: 'pipeline'
+      dry_run:
+        description: 'NDA dry-run (true = no firma, solo review)'
+        required: false
+        default: 'false'
 
 jobs:
   scrape:
@@ -42,6 +46,7 @@ jobs:
           SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NDA_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: npx tsx src/index.ts ${{ github.event.inputs.command || 'pipeline' }}
 
       - name: Upload debug artifacts on failure

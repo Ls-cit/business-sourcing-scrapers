@@ -50,6 +50,13 @@ export const CONFIG = {
     maxTokens: 4000,
   },
 
+  // NDA behavior flags
+  nda: {
+    /** Si true: review sí, sign NO. Marca verdict en sheet, deja nda_signed=false.
+     *  Útil para validar verdicts antes de comprometerse legalmente con firmas. */
+    dryRun: opt('NDA_DRY_RUN') === 'true',
+  },
+
   // Datos canónicos para llenar NDAs (decisión: signer Francisco, contact codingit5)
   buyer: {
     companyName: 'CodingIT LLC',

@@ -27,6 +27,7 @@ import { reviewNda } from './review.js';
 import { signNdaOnFlippa } from './sign.js';
 import {
   getListingsPendingNdaReview,
+  getListingsPendingNdaSign,
   updateNdaFields,
   type NdaFieldsUpdate,
 } from '../sheets/writer.js';
@@ -119,25 +120,31 @@ export async function processNdaQueue(): Promise<NdaProcessResult> {
         };
 
         if (review.verdict === 'GREEN') {
-          // Sign
-          log.info(`NDA process: [${row.listing_id}] verdict GREEN → firmando`);
-          await humanDelay(2000, 4000);
-          const sign = await signNdaOnFlippa(context, row.url);
-          if (sign.signed) {
-            result.signed++;
-            await updateNdaFields(rowIndex, {
-              ...baseUpdate,
-              nda_signed: true,
-              nda_signed_at: new Date().toISOString(),
-            });
+          if (CONFIG.nda.dryRun) {
+            log.warn(`NDA process: [${row.listing_id}] verdict GREEN — DRY_RUN, no firmo`);
+            await updateNdaFields(rowIndex, baseUpdate);
+            // nda_signed queda en false, verdict GREEN guardado, listing queda elegible para `sign-greens`
           } else {
-            log.warn(`NDA process: [${row.listing_id}] firma falló: ${sign.error}`);
-            await updateNdaFields(rowIndex, {
-              ...baseUpdate,
-              nda_signed: false,
-              nda_signed_at: '',
-              nda_pushback_email: `[AUTO-SIGN FAILED] ${sign.error || ''}`,
-            });
+            // Sign
+            log.info(`NDA process: [${row.listing_id}] verdict GREEN → firmando`);
+            await humanDelay(2000, 4000);
+            const sign = await signNdaOnFlippa(context, row.url);
+            if (sign.signed) {
+              result.signed++;
+              await updateNdaFields(rowIndex, {
+                ...baseUpdate,
+                nda_signed: true,
+                nda_signed_at: new Date().toISOString(),
+              });
+            } else {
+              log.warn(`NDA process: [${row.listing_id}] firma falló: ${sign.error}`);
+              await updateNdaFields(rowIndex, {
+                ...baseUpdate,
+                nda_signed: false,
+                nda_signed_at: '',
+                nda_pushback_email: `[AUTO-SIGN FAILED] ${sign.error || ''}`,
+              });
+            }
           }
         } else {
           // YELLOW / RED — guarda pushback + manda email
@@ -167,5 +174,79 @@ export async function processNdaQueue(): Promise<NdaProcessResult> {
   }
 
   log.info(`NDA process: done — ${JSON.stringify(result)}`);
+  return result;
+}
+
+export interface NdaSignGreensResult {
+  considered: number;
+  signed: number;
+  errors: number;
+}
+
+/**
+ * Firma TODOS los listings que ya tienen verdict=GREEN y nda_signed=FALSE.
+ * Pensado para usar después de un NDA_DRY_RUN: una vez que viste los verdicts,
+ * disparás esto para concretar las firmas.
+ */
+export async function processSignPendingGreens(): Promise<NdaSignGreensResult> {
+  const pending = await getListingsPendingNdaSign();
+  const flippaPending = pending.filter((p) => p.row.source === 'flippa');
+
+  log.info(`sign-greens: ${flippaPending.length} listings GREEN pending sign (Flippa)`);
+  const result: NdaSignGreensResult = { considered: flippaPending.length, signed: 0, errors: 0 };
+
+  if (flippaPending.length === 0) return result;
+  if (!CONFIG.flippa.email || !CONFIG.flippa.password) {
+    log.warn('sign-greens: Flippa credentials no seteadas — skip');
+    return result;
+  }
+
+  let browser: Browser | null = null;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--disable-blink-features=AutomationControlled'],
+    });
+    const context = await browser.newContext({
+      userAgent:
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+        '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      viewport: { width: 1366, height: 768 },
+      locale: 'en-US',
+    });
+
+    await loginFlippa(context);
+
+    for (const { rowIndex, row } of flippaPending) {
+      try {
+        log.info(`sign-greens: [${row.listing_id}] firmando`);
+        await humanDelay(2000, 4000);
+        const sign = await signNdaOnFlippa(context, row.url);
+        if (sign.signed) {
+          result.signed++;
+          await updateNdaFields(rowIndex, {
+            needs_nda_review: false,
+            nda_verdict: 'GREEN',
+            nda_analysis: row.nda_analysis,
+            nda_review_date: row.nda_review_date,
+            nda_signed: true,
+            nda_signed_at: new Date().toISOString(),
+            nda_pushback_email: '',
+          });
+        } else {
+          log.warn(`sign-greens: [${row.listing_id}] firma falló: ${sign.error}`);
+          result.errors++;
+        }
+        await humanDelay(3000, 6000);
+      } catch (err) {
+        result.errors++;
+        log.error(`sign-greens: [${row.listing_id}] error`, err);
+      }
+    }
+  } finally {
+    if (browser) await browser.close();
+  }
+
+  log.info(`sign-greens: done — ${JSON.stringify(result)}`);
   return result;
 }
