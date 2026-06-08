@@ -74,8 +74,26 @@ export async function scrapeFlippa(): Promise<ScraperResult> {
     const raw = await fetchAllListings(context, () => requestCount++);
 
     log.info(`Flippa: total raw listings traídos: ${raw.length}`);
-    const filtered = applyClientFilters(raw);
-    log.info(`Flippa: post-filtro client-side (USA + open): ${filtered.length}`);
+    // 1) Filtro server-side básico: solo status=open. Country se filtra después
+    //    con Business Location del detail page (no seller_location).
+    const opens = raw.filter((r) => !CONFIG.flippa.filters.onlyOpen || r.status === 'open');
+    log.info(`Flippa: post-filtro status=open: ${opens.length}`);
+
+    // 2) Para cada listing, fetch detail page para extraer Business Location real.
+    log.info(`Flippa: enriqueciendo ${opens.length} listings con Business Location`);
+    const enriched: Array<FlippaApiListing & { business_location: string }> = [];
+    for (const r of opens) {
+      const url = String(r.html_url || `https://flippa.com/${r.id}`);
+      const bizLoc = await fetchBusinessLocation(context, url, () => requestCount++);
+      enriched.push({ ...r, business_location: bizLoc });
+      await humanDelay(800, 2000);
+    }
+
+    // 3) Filtro client-side: business_location indica US (estado o "United States").
+    const filtered = CONFIG.flippa.filters.country
+      ? enriched.filter((r) => isUSBusiness(r.business_location))
+      : enriched;
+    log.info(`Flippa: post-filtro Business Location=US: ${filtered.length}`);
 
     const normalized = filtered.map(toNormalized);
 
@@ -197,15 +215,39 @@ async function fetchAllListings(
   return all;
 }
 
-function applyClientFilters(rows: FlippaApiListing[]): FlippaApiListing[] {
-  return rows.filter((r) => {
-    if (CONFIG.flippa.filters.onlyOpen && r.status !== 'open') return false;
-    if (CONFIG.flippa.filters.country && r.seller_location !== CONFIG.flippa.filters.country) return false;
-    return true;
-  });
+/**
+ * Fetch detail page y extrae "Business Location" del HTML.
+ * Devuelve string vacío si no se encuentra.
+ */
+async function fetchBusinessLocation(
+  context: BrowserContext,
+  url: string,
+  onRequest: () => void
+): Promise<string> {
+  onRequest();
+  try {
+    const resp = await context.request.get(url, {
+      headers: { Accept: 'text/html' },
+    });
+    if (resp.status() !== 200) return '';
+    const html = await resp.text();
+    const m = html.match(
+      /Business Location\s*<\/span>[\s\S]{0,200}?<a[^>]*>([^<]+)<\/a>/i
+    );
+    return m ? m[1].trim() : '';
+  } catch {
+    return '';
+  }
 }
 
-function toNormalized(r: FlippaApiListing): NormalizedListing {
+/** Heurística: el business está en US si "Business Location" termina en "United States" o "USA". */
+function isUSBusiness(loc: string): boolean {
+  if (!loc) return false;
+  const l = loc.toLowerCase();
+  return l.includes('united states') || l.endsWith(', usa') || l === 'usa';
+}
+
+function toNormalized(r: FlippaApiListing & { business_location?: string }): NormalizedListing {
   const price = typeof r.display_price === 'number' ? r.display_price :
                 typeof r.current_price === 'number' ? r.current_price : null;
   const monthlyProfit = typeof r.profit_per_month === 'number' ? r.profit_per_month : null;
@@ -224,7 +266,9 @@ function toNormalized(r: FlippaApiListing): NormalizedListing {
     monthly_profit: monthlyProfit,
     monthly_revenue: monthlyRevenue,
     multiple_years: multipleYears,
-    location: String(r.seller_location || ''),
+    // Usamos business_location (del detail page) en vez de seller_location
+    // porque indica DÓNDE OPERA el negocio, no dónde vive el broker/seller.
+    location: String(r.business_location || r.seller_location || ''),
     category: String(r.property_name || r.property_type || ''),
     age_years: ageYears,
     status: String(r.status || ''),
