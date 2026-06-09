@@ -17,7 +17,10 @@ export const CONFIG = {
   sheets: {
     spreadsheetId: req('SHEET_ID'),
     serviceAccountJson: req('GOOGLE_SERVICE_ACCOUNT_JSON'),
-    tabInflow: 'Scraper_Inflow',
+    // Tabs canónicos en la SSOT (no se crean, ya existen)
+    tabDealflow: 'Dealflow',
+    // Tab interno que SÍ creamos (autorizado: "agregar en una nueva pestaña")
+    tabScraperState: 'Scraper_State',
     tabRunLog: 'Run_Log',
   },
 

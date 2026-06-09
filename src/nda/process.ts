@@ -2,20 +2,15 @@
  * NDA Pipeline Processor (Task 2 + Task 3 combinados).
  *
  * Flujo:
- *   1. Lee Sheet → busca listings con needs_nda_review=TRUE y nda_verdict vacío.
+ *   1. Lee Scraper_State → busca listings con needs_nda_review=TRUE y nda_verdict vacío.
  *   2. Loguea en Flippa (reusa loginFlippa del scraper).
  *   3. Para cada listing pendiente:
  *      a. Extrae texto del NDA del listing
  *      b. Envía a Anthropic API → obtiene verdict + analysis + pushback_email
- *      c. Si verdict === GREEN → firma automáticamente (Task 3)
+ *      c. Si verdict === GREEN → firma automáticamente (Task 3), salvo NDA_DRY_RUN
  *      d. Si verdict === YELLOW/RED → guarda pushback draft + manda email
- *      e. Update sheet con resultado (per-listing, atómico)
- *   4. Devuelve summary (reviewed, signed, pushback_drafted, errors).
- *
- * Notas operativas:
- *   - Si el browser muere a mitad → el progreso queda en la Sheet por listing
- *     (no perdés trabajo).
- *   - Delays humanos entre listings para no levantar alarmas.
+ *      e. Update Scraper_State (verdict/analysis/firma) + Dealflow col U (status legible)
+ *   4. Devuelve summary.
  */
 
 import { chromium, Browser } from 'playwright';
@@ -30,6 +25,7 @@ import {
   getListingsPendingNdaSign,
   updateNdaFields,
   type NdaFieldsUpdate,
+  type PendingNdaItem,
 } from '../sheets/writer.js';
 import { sendPushbackEmail } from '../notify/pushback.js';
 
@@ -43,7 +39,7 @@ export interface NdaProcessResult {
 
 export async function processNdaQueue(): Promise<NdaProcessResult> {
   const pending = await getListingsPendingNdaReview();
-  const flippaPending = pending.filter((p) => p.row.source === 'flippa');
+  const flippaPending = pending.filter((p) => p.source === 'flippa');
 
   log.info(`NDA process: ${flippaPending.length} listings pending review (Flippa)`);
 
@@ -77,21 +73,21 @@ export async function processNdaQueue(): Promise<NdaProcessResult> {
 
     await loginFlippa(context);
 
-    for (const { rowIndex, row } of flippaPending) {
+    for (const item of flippaPending) {
       try {
-        log.info(`NDA process: [${row.listing_id}] ${row.title.slice(0, 60)}`);
+        log.info(`NDA process: [#${item.num} ${item.listingId}] ${item.title.slice(0, 60)}`);
 
         // Extract
-        const ext = await extractNdaFromListing(context, row.url);
+        const ext = await extractNdaFromListing(context, item.url);
         if (!ext.hasNda) {
-          log.warn(`NDA process: [${row.listing_id}] no tiene NDA visible — skip`);
-          await updateNdaFields(rowIndex, {
+          log.warn(`NDA process: [#${item.num}] no tiene NDA visible — skip`);
+          await updateNdaFields(item.scraperStateRowIndex, item.dealflowRowIndex, {
             needs_nda_review: false,
             nda_verdict: '',
             nda_analysis: 'No NDA visible en la página (requiere acceso especial o el listing cambió)',
             nda_review_date: new Date().toISOString(),
-            nda_signed: row.nda_signed,
-            nda_signed_at: row.nda_signed_at,
+            nda_signed: item.ndaSigned,
+            nda_signed_at: item.ndaSignedAt,
             nda_pushback_email: '',
           });
           continue;
@@ -107,38 +103,36 @@ export async function processNdaQueue(): Promise<NdaProcessResult> {
           '',
           'Cláusulas notables:',
           ...review.clauses_notable.map((c) => `- [${c.classification}] ${c.clause}: ${c.note}`),
-        ].join('\n').slice(0, 5000); // tope para Sheet cell
+        ].join('\n').slice(0, 5000);
 
         const baseUpdate: NdaFieldsUpdate = {
           needs_nda_review: false,
           nda_verdict: review.verdict,
           nda_analysis: analysisSummary,
           nda_review_date: reviewDate,
-          nda_signed: row.nda_signed,
-          nda_signed_at: row.nda_signed_at,
+          nda_signed: item.ndaSigned,
+          nda_signed_at: item.ndaSignedAt,
           nda_pushback_email: review.pushback_email,
         };
 
         if (review.verdict === 'GREEN') {
           if (CONFIG.nda.dryRun) {
-            log.warn(`NDA process: [${row.listing_id}] verdict GREEN — DRY_RUN, no firmo`);
-            await updateNdaFields(rowIndex, baseUpdate);
-            // nda_signed queda en false, verdict GREEN guardado, listing queda elegible para `sign-greens`
+            log.warn(`NDA process: [#${item.num}] verdict GREEN — DRY_RUN, no firmo`);
+            await updateNdaFields(item.scraperStateRowIndex, item.dealflowRowIndex, baseUpdate);
           } else {
-            // Sign
-            log.info(`NDA process: [${row.listing_id}] verdict GREEN → firmando`);
+            log.info(`NDA process: [#${item.num}] verdict GREEN → firmando`);
             await humanDelay(2000, 4000);
-            const sign = await signNdaOnFlippa(context, row.url);
+            const sign = await signNdaOnFlippa(context, item.url);
             if (sign.signed) {
               result.signed++;
-              await updateNdaFields(rowIndex, {
+              await updateNdaFields(item.scraperStateRowIndex, item.dealflowRowIndex, {
                 ...baseUpdate,
                 nda_signed: true,
                 nda_signed_at: new Date().toISOString(),
               });
             } else {
-              log.warn(`NDA process: [${row.listing_id}] firma falló: ${sign.error}`);
-              await updateNdaFields(rowIndex, {
+              log.warn(`NDA process: [#${item.num}] firma falló: ${sign.error}`);
+              await updateNdaFields(item.scraperStateRowIndex, item.dealflowRowIndex, {
                 ...baseUpdate,
                 nda_signed: false,
                 nda_signed_at: '',
@@ -147,14 +141,13 @@ export async function processNdaQueue(): Promise<NdaProcessResult> {
             }
           }
         } else {
-          // YELLOW / RED — guarda pushback + manda email
-          log.info(`NDA process: [${row.listing_id}] verdict ${review.verdict} → pushback`);
-          await updateNdaFields(rowIndex, baseUpdate);
+          log.info(`NDA process: [#${item.num}] verdict ${review.verdict} → pushback`);
+          await updateNdaFields(item.scraperStateRowIndex, item.dealflowRowIndex, baseUpdate);
           if (review.pushback_email) {
             await sendPushbackEmail({
-              listingId: row.listing_id,
-              listingTitle: row.title,
-              listingUrl: row.url,
+              listingId: item.listingId,
+              listingTitle: item.title,
+              listingUrl: item.url,
               verdict: review.verdict,
               rationale: review.rationale,
               pushbackBody: review.pushback_email,
@@ -163,10 +156,10 @@ export async function processNdaQueue(): Promise<NdaProcessResult> {
           }
         }
 
-        await humanDelay(3000, 6000); // delay entre listings
+        await humanDelay(3000, 6000);
       } catch (err) {
         result.errors++;
-        log.error(`NDA process: [${row.listing_id}] error`, err);
+        log.error(`NDA process: [#${item.num}] error`, err);
       }
     }
   } finally {
@@ -184,13 +177,12 @@ export interface NdaSignGreensResult {
 }
 
 /**
- * Firma TODOS los listings que ya tienen verdict=GREEN y nda_signed=FALSE.
- * Pensado para usar después de un NDA_DRY_RUN: una vez que viste los verdicts,
- * disparás esto para concretar las firmas.
+ * Firma todos los listings con verdict=GREEN y nda_signed=FALSE.
+ * Usar después de un NDA_DRY_RUN para concretar las firmas.
  */
 export async function processSignPendingGreens(): Promise<NdaSignGreensResult> {
   const pending = await getListingsPendingNdaSign();
-  const flippaPending = pending.filter((p) => p.row.source === 'flippa');
+  const flippaPending = pending.filter((p) => p.source === 'flippa');
 
   log.info(`sign-greens: ${flippaPending.length} listings GREEN pending sign (Flippa)`);
   const result: NdaSignGreensResult = { considered: flippaPending.length, signed: 0, errors: 0 };
@@ -217,30 +209,30 @@ export async function processSignPendingGreens(): Promise<NdaSignGreensResult> {
 
     await loginFlippa(context);
 
-    for (const { rowIndex, row } of flippaPending) {
+    for (const item of flippaPending) {
       try {
-        log.info(`sign-greens: [${row.listing_id}] firmando`);
+        log.info(`sign-greens: [#${item.num} ${item.listingId}] firmando`);
         await humanDelay(2000, 4000);
-        const sign = await signNdaOnFlippa(context, row.url);
+        const sign = await signNdaOnFlippa(context, item.url);
         if (sign.signed) {
           result.signed++;
-          await updateNdaFields(rowIndex, {
+          await updateNdaFields(item.scraperStateRowIndex, item.dealflowRowIndex, {
             needs_nda_review: false,
             nda_verdict: 'GREEN',
-            nda_analysis: row.nda_analysis,
-            nda_review_date: row.nda_review_date,
+            nda_analysis: item.ndaAnalysis,
+            nda_review_date: item.ndaReviewDate,
             nda_signed: true,
             nda_signed_at: new Date().toISOString(),
             nda_pushback_email: '',
           });
         } else {
-          log.warn(`sign-greens: [${row.listing_id}] firma falló: ${sign.error}`);
+          log.warn(`sign-greens: [#${item.num}] firma falló: ${sign.error}`);
           result.errors++;
         }
         await humanDelay(3000, 6000);
       } catch (err) {
         result.errors++;
-        log.error(`sign-greens: [${row.listing_id}] error`, err);
+        log.error(`sign-greens: [#${item.num}] error`, err);
       }
     }
   } finally {
@@ -250,3 +242,6 @@ export async function processSignPendingGreens(): Promise<NdaSignGreensResult> {
   log.info(`sign-greens: done — ${JSON.stringify(result)}`);
   return result;
 }
+
+// Suppress unused type warning
+export type { PendingNdaItem };
