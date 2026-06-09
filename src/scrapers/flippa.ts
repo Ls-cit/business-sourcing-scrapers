@@ -111,7 +111,10 @@ export async function scrapeFlippa(): Promise<ScraperResult> {
 export async function loginFlippa(context: BrowserContext): Promise<void> {
   const page = await context.newPage();
   log.info('Flippa: navegando a login');
-  await page.goto(FLIPPA_LOGIN_URL, { waitUntil: 'networkidle', timeout: 45_000 });
+  // 'domcontentloaded' (no 'networkidle') porque Flippa tiene muchos trackers
+  // third-party que mantienen la red ocupada continuamente — nunca llega a idle.
+  // El waitFor del email input se encarga de esperar a que el JS renderice el form.
+  await page.goto(FLIPPA_LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await humanDelay(1500, 3000);
 
   // Selectores múltiples — Flippa usa Rails convention `user[email]` + variantes.
