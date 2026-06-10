@@ -86,7 +86,8 @@ export async function scrapeFlippa(): Promise<ScraperResult> {
       const url = String(r.html_url || `https://flippa.com/${r.id}`);
       const bizLoc = await fetchBusinessLocation(context, url, () => requestCount++);
       enriched.push({ ...r, business_location: bizLoc });
-      await humanDelay(800, 2000);
+      // Delay generoso para no gatillar rate-limit de Flippa en detail fetches
+      await humanDelay(1500, 3000);
     }
 
     // 3) Filtro client-side: business_location indica US (estado o "United States").
@@ -220,27 +221,54 @@ async function fetchAllListings(
 
 /**
  * Fetch detail page y extrae "Business Location" del HTML.
- * Devuelve string vacío si no se encuentra.
+ * Loguea cuando falla y reintenta 1 vez con backoff.
  */
 async function fetchBusinessLocation(
   context: BrowserContext,
   url: string,
   onRequest: () => void
 ): Promise<string> {
-  onRequest();
-  try {
-    const resp = await context.request.get(url, {
-      headers: { Accept: 'text/html' },
-    });
-    if (resp.status() !== 200) return '';
-    const html = await resp.text();
-    const m = html.match(
-      /Business Location\s*<\/span>[\s\S]{0,200}?<a[^>]*>([^<]+)<\/a>/i
-    );
-    return m ? m[1].trim() : '';
-  } catch {
-    return '';
+  const BIZ_LOC_REGEX = /Business Location\s*<\/span>[\s\S]{0,200}?<a[^>]*>([^<]+)<\/a>/i;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    onRequest();
+    try {
+      const resp = await context.request.get(url, {
+        headers: { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+        timeout: 20_000,
+      });
+      const status = resp.status();
+      if (status !== 200) {
+        log.warn(`Business Location fetch: HTTP ${status} en ${url} (attempt ${attempt})`);
+        if (attempt < 2) {
+          await humanDelay(3000, 5000);
+          continue;
+        }
+        return '';
+      }
+      const html = await resp.text();
+      const m = html.match(BIZ_LOC_REGEX);
+      if (m) return m[1].trim();
+      // 200 OK pero el regex no matchea — caso esperable para algunos listings sin Business Location en HTML
+      if (attempt < 2 && html.length < 5000) {
+        // Respuesta sospechosamente corta — quizás bloqueado por Cloudflare/anti-bot, reintentar
+        log.warn(`Business Location fetch: 200 OK pero HTML corto (${html.length} chars) — retry`);
+        await humanDelay(3000, 5000);
+        continue;
+      }
+      log.info(`Business Location: not present en ${url} (HTML ${html.length} chars) — asumimos no-US`);
+      return '';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`Business Location fetch error attempt ${attempt} para ${url}: ${msg}`);
+      if (attempt < 2) {
+        await humanDelay(3000, 5000);
+        continue;
+      }
+      return '';
+    }
   }
+  return '';
 }
 
 /** Heurística: el business está en US si "Business Location" termina en "United States" o "USA". */
