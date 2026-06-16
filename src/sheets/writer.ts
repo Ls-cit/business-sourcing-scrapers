@@ -498,24 +498,12 @@ export async function upsertListings(listings: NormalizedListing[]): Promise<Ups
     }
   }
 
-  // Bulk inserts
-  if (toInsertDealflow.length > 0) {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: CONFIG.sheets.spreadsheetId,
-      range: `${CONFIG.sheets.tabDealflow}!A1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: toInsertDealflow },
-    });
-  }
-  if (toInsertState.length > 0) {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: CONFIG.sheets.spreadsheetId,
-      range: `${CONFIG.sheets.tabScraperState}!A1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: toInsertState },
-    });
-  }
-  // Bulk updates
+  // ORDER OF OPERATIONS:
+  // 1. UPDATES primero — los rowIndex de filas existentes son válidos AHORA.
+  // 2. INSERTS al row 2 (no append) — convención SSOT: nuevo arriba, # descendente.
+  //    Insertar al row 2 desplaza las existentes hacia abajo, pero las updates
+  //    ya pasaron antes de ese shift.
+
   if (dealflowUpdates.length > 0 || stateUpdates.length > 0) {
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: CONFIG.sheets.spreadsheetId,
@@ -524,6 +512,71 @@ export async function upsertListings(listings: NormalizedListing[]): Promise<Ups
         data: [...dealflowUpdates, ...stateUpdates],
       },
     });
+  }
+
+  if (toInsertDealflow.length > 0 || toInsertState.length > 0) {
+    // Ordenar inserts por # descendente — newest (# más alto) primero
+    toInsertDealflow.sort((a, b) => (Number(b[0]) || 0) - (Number(a[0]) || 0));
+    toInsertState.sort((a, b) => (Number(b[0]) || 0) - (Number(a[0]) || 0));
+
+    const dealflowSheetId = await getSheetIdByName(CONFIG.sheets.tabDealflow);
+    const stateSheetId = await getSheetIdByName(CONFIG.sheets.tabScraperState);
+
+    // Insertar filas vacías al row 2 (índice 1 zero-based) en ambos tabs
+    const insertRequests: any[] = [];
+    if (toInsertDealflow.length > 0 && dealflowSheetId !== null) {
+      insertRequests.push({
+        insertDimension: {
+          range: {
+            sheetId: dealflowSheetId,
+            dimension: 'ROWS',
+            startIndex: 1,
+            endIndex: 1 + toInsertDealflow.length,
+          },
+          inheritFromBefore: false,
+        },
+      });
+    }
+    if (toInsertState.length > 0 && stateSheetId !== null) {
+      insertRequests.push({
+        insertDimension: {
+          range: {
+            sheetId: stateSheetId,
+            dimension: 'ROWS',
+            startIndex: 1,
+            endIndex: 1 + toInsertState.length,
+          },
+          inheritFromBefore: false,
+        },
+      });
+    }
+    if (insertRequests.length > 0) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: CONFIG.sheets.spreadsheetId,
+        requestBody: { requests: insertRequests },
+      });
+    }
+
+    // Llenar las filas insertadas (row 2 hasta 2+N-1)
+    const valuesData: { range: string; values: any[][] }[] = [];
+    if (toInsertDealflow.length > 0) {
+      valuesData.push({
+        range: `${CONFIG.sheets.tabDealflow}!A2:${DEALFLOW_LAST_COL}${1 + toInsertDealflow.length}`,
+        values: toInsertDealflow,
+      });
+    }
+    if (toInsertState.length > 0) {
+      valuesData.push({
+        range: `${CONFIG.sheets.tabScraperState}!A2:${SCRAPER_STATE_LAST_COL}${1 + toInsertState.length}`,
+        values: toInsertState,
+      });
+    }
+    if (valuesData.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: CONFIG.sheets.spreadsheetId,
+        requestBody: { valueInputOption: 'RAW', data: valuesData },
+      });
+    }
   }
 
   return { inserted, updated, total: listings.length };
