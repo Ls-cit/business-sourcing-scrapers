@@ -16,6 +16,7 @@
  */
 
 import { scrapeFlippa } from './scrapers/flippa.js';
+import { scrapeIndianaEquityBrokers } from './scrapers/brokers/indianaequitybrokers.js';
 import { upsertListings, appendRunLog } from './sheets/writer.js';
 import { maybeNotifyFailure } from './notify/email.js';
 import { processNdaQueue, processSignPendingGreens } from './nda/process.js';
@@ -29,6 +30,7 @@ interface ScraperFn {
 const SCRAPERS: Record<Source, ScraperFn> = {
   flippa: scrapeFlippa,
   bizscout: () => { throw new Error('BizScout aún no implementado'); },
+  indianaequitybrokers: scrapeIndianaEquityBrokers,
 };
 
 async function runOne(source: Source): Promise<{ ok: boolean; message: string }> {
@@ -111,9 +113,17 @@ async function main() {
       log.error('sign-greens failed', err);
       anyFailed = true;
     }
-  } else if (arg === 'pipeline' || arg === 'all' || arg === 'flippa') {
+  } else if (
+    arg === 'pipeline' ||
+    arg === 'all' ||
+    arg === 'flippa' ||
+    arg === 'indianaequitybrokers'
+  ) {
     // Sources scope
-    const sources: Source[] = arg === 'flippa' ? ['flippa'] : ['flippa']; // ampliar cuando se sume bizscout
+    let sources: Source[];
+    if (arg === 'flippa') sources = ['flippa'];
+    else if (arg === 'indianaequitybrokers') sources = ['indianaequitybrokers'];
+    else sources = ['flippa', 'indianaequitybrokers']; // all + pipeline
     for (const src of sources) {
       const { ok } = await runOne(src);
       if (!ok) anyFailed = true;

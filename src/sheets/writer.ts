@@ -271,13 +271,29 @@ async function readScraperState(): Promise<ScraperStateRow[]> {
 
 // ========================== Mapping ==========================
 
-function sourceTypeFor(_source: Source): string {
-  // Flippa y BizScout son marketplaces — S3 per "Source types" tab
-  return 'S3: Market Place';
+/**
+ * Mapeo source → Source_Type canónico (per tab "Source types" en la SSOT).
+ * - S2: Broker      → business brokers tradicionales con listings en su web
+ * - S3: Market Place → plataformas tipo Flippa/BizScout/Acquire
+ */
+const SOURCE_TYPE_BY_SOURCE: Record<Source, string> = {
+  flippa: 'S3: Market Place',
+  bizscout: 'S3: Market Place',
+  indianaequitybrokers: 'S2: Broker',
+};
+
+const SUB_SOURCE_BY_SOURCE: Record<Source, string> = {
+  flippa: 'Flippa',
+  bizscout: 'BizScout',
+  indianaequitybrokers: 'Indiana Equity Brokers',
+};
+
+function sourceTypeFor(source: Source): string {
+  return SOURCE_TYPE_BY_SOURCE[source] || 'S2: Broker';
 }
 
 function subSourceFor(source: Source): string {
-  return source === 'flippa' ? 'Flippa' : 'BizScout';
+  return SUB_SOURCE_BY_SOURCE[source] || source;
 }
 
 function defaultBrokerContact(source: Source, brokerName: string): string {
