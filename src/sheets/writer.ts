@@ -280,12 +280,14 @@ const SOURCE_TYPE_BY_SOURCE: Record<Source, string> = {
   flippa: 'S3: Market Place',
   bizscout: 'S3: Market Place',
   indianaequitybrokers: 'S2: Broker',
+  synergybb: 'S2: Broker',
 };
 
 const SUB_SOURCE_BY_SOURCE: Record<Source, string> = {
   flippa: 'Flippa',
   bizscout: 'BizScout',
   indianaequitybrokers: 'Indiana Equity Brokers',
+  synergybb: 'Synergy Business Brokers',
 };
 
 function sourceTypeFor(source: Source): string {

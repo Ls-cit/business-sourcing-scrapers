@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: 'Comando (flippa | indianaequitybrokers | all | nda | sign-greens | pipeline)'
+        description: 'Comando (flippa | indianaequitybrokers | synergybb | all | nda | sign-greens | pipeline)'
         required: false
         default: 'pipeline'
       dry_run:

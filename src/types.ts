@@ -2,7 +2,11 @@
  * Tipos compartidos entre scrapers, sheets writer y notifier.
  */
 
-export type Source = 'flippa' | 'bizscout' | 'indianaequitybrokers';
+export type Source =
+  | 'flippa'
+  | 'bizscout'
+  | 'indianaequitybrokers'
+  | 'synergybb';
 
 /**
  * Schema unificado de un listing en el tab Scraper_Inflow.

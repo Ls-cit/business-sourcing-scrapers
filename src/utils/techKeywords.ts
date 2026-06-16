@@ -16,14 +16,33 @@
 const KEYWORDS = [
   'SaaS',
   'Software as a Service',
-  'tech',
+  'tech',           // standalone "tech" como palabra
+  'technology',     // forma sustantiva — matchea "Technology"
   'software',
   'legacy software',
 ];
 
+/**
+ * Patrón:
+ *   - SaaS / Software as a Service / legacy software → word boundary estricto
+ *   - tech / technology / software → permite prefijos (EdTech, FinTech, biotech)
+ *     pero requiere boundary al final (no "techie", "technical-foo")
+ *
+ * Esto matchea: "EdTech", "FinTech", "Technology", "Software", "tech-enabled".
+ * No matchea: "technical writer", "techie person".
+ */
 const KEYWORD_REGEX = (() => {
-  const escaped = KEYWORDS.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  return new RegExp('\\b(?:' + escaped.join('|') + ')\\b', 'i');
+  // Para "tech", "technology", "software" permitimos prefijo (ej. EdTech)
+  // Para frases multi-word, exigimos word boundary completo
+  const parts = [
+    '\\bSaaS\\b',
+    '\\bSoftware as a Service\\b',
+    '\\blegacy software\\b',
+    'tech\\b',          // EdTech, FinTech, tech ✓ ; techie ✗
+    'technology\\b',    // Technology, biotechnology ✓
+    'software\\b',      // Software ✓
+  ];
+  return new RegExp('(?:' + parts.join('|') + ')', 'i');
 })();
 
 /**
