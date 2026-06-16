@@ -281,6 +281,7 @@ const SOURCE_TYPE_BY_SOURCE: Record<Source, string> = {
   bizscout: 'S3: Market Place',
   indianaequitybrokers: 'S2: Broker',
   synergybb: 'S2: Broker',
+  inbargroup: 'S2: Broker',
 };
 
 const SUB_SOURCE_BY_SOURCE: Record<Source, string> = {
@@ -288,6 +289,7 @@ const SUB_SOURCE_BY_SOURCE: Record<Source, string> = {
   bizscout: 'BizScout',
   indianaequitybrokers: 'Indiana Equity Brokers',
   synergybb: 'Synergy Business Brokers',
+  inbargroup: 'Inbar Group',
 };
 
 function sourceTypeFor(source: Source): string {

@@ -6,7 +6,8 @@ export type Source =
   | 'flippa'
   | 'bizscout'
   | 'indianaequitybrokers'
-  | 'synergybb';
+  | 'synergybb'
+  | 'inbargroup';
 
 /**
  * Schema unificado de un listing en el tab Scraper_Inflow.

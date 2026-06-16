@@ -18,6 +18,7 @@
 import { CONFIG } from '../../config.js';
 import { log } from '../../utils/log.js';
 import { matchesTechKeyword } from '../../utils/techKeywords.js';
+import { isUSLocation } from '../../utils/usLocation.js';
 import type { NormalizedListing, ScraperResult } from '../../types.js';
 
 const TECH_LISTINGS_URL = 'https://synergybb.com/industries/tech-businesses-for-sale/';
@@ -162,31 +163,6 @@ function parseCards(html: string): CardData[] {
     });
   }
   return out;
-}
-
-// ============================== Filtros ==============================
-
-/**
- * Devuelve true si la location pinta como US.
- * Acepta: "United States", "USA", o cualquier estado de los 50 (full name).
- * Rechaza: "Asia", "Singapore", "India", "Canada", etc.
- */
-function isUSLocation(loc: string): boolean {
-  if (!loc) return false;
-  const l = loc.toLowerCase();
-  if (l.includes('united states') || l.includes('usa')) return true;
-  // Match contra los 50 estados (lowercase, palabra completa)
-  const US_STATES = [
-    'alabama','alaska','arizona','arkansas','california','colorado','connecticut',
-    'delaware','florida','georgia','hawaii','idaho','illinois','indiana','iowa',
-    'kansas','kentucky','louisiana','maine','maryland','massachusetts','michigan',
-    'minnesota','mississippi','missouri','montana','nebraska','nevada',
-    'new hampshire','new jersey','new mexico','new york','north carolina',
-    'north dakota','ohio','oklahoma','oregon','pennsylvania','rhode island',
-    'south carolina','south dakota','tennessee','texas','utah','vermont',
-    'virginia','washington','west virginia','wisconsin','wyoming',
-  ];
-  return US_STATES.some((s) => new RegExp('\\b' + s + '\\b', 'i').test(l));
 }
 
 // ============================== Helpers ==============================
