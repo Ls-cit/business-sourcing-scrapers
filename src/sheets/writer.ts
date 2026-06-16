@@ -458,10 +458,16 @@ export async function upsertListings(listings: NormalizedListing[]): Promise<Ups
     const existingState = stateBySlug.get(slug) || stateByListingId.get(idKey) || null;
 
     if (existingState) {
-      // UPDATE
+      // UPDATE en Scraper_State (ya existe)
       const dealflowRow = dealflowByNum.get(existingState.num);
       if (dealflowRow) {
+        // Caso normal: ambos tabs sincronizados → update Dealflow
         dealflowUpdates.push(...buildDealflowUpdates(dealflowRow.rowIndex, listing, existingState));
+      } else {
+        // Desincronización: Scraper_State tiene el registro pero Dealflow no
+        // (probablemente el user borró la fila manualmente). Reinsertamos.
+        log.warn(`Dealflow row missing for #${existingState.num} (Scraper_State row${existingState.rowIndex}). Reinsertando en Dealflow.`);
+        toInsertDealflow.push(listingToDealflowRow(existingState.num, listing, existingState, true));
       }
       // Refresca Scraper_State: last_seen, raw_json
       stateUpdates.push({
