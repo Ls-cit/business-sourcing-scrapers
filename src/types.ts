@@ -7,7 +7,8 @@ export type Source =
   | 'bizscout'
   | 'indianaequitybrokers'
   | 'synergybb'
-  | 'inbargroup';
+  | 'inbargroup'
+  | 'tworld';
 
 /**
  * Schema unificado de un listing en el tab Scraper_Inflow.

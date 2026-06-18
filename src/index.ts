@@ -19,6 +19,7 @@ import { scrapeFlippa } from './scrapers/flippa.js';
 import { scrapeIndianaEquityBrokers } from './scrapers/brokers/indianaequitybrokers.js';
 import { scrapeSynergyBB } from './scrapers/brokers/synergybb.js';
 import { scrapeInbarGroup } from './scrapers/brokers/inbargroup.js';
+import { scrapeTworld } from './scrapers/brokers/tworld.js';
 import { upsertListings, appendRunLog } from './sheets/writer.js';
 import { maybeNotifyFailure } from './notify/email.js';
 import { processNdaQueue, processSignPendingGreens } from './nda/process.js';
@@ -35,6 +36,7 @@ const SCRAPERS: Record<Source, ScraperFn> = {
   indianaequitybrokers: scrapeIndianaEquityBrokers,
   synergybb: scrapeSynergyBB,
   inbargroup: scrapeInbarGroup,
+  tworld: scrapeTworld,
 };
 
 async function runOne(source: Source): Promise<{ ok: boolean; message: string }> {
@@ -123,7 +125,8 @@ async function main() {
     arg === 'flippa' ||
     arg === 'indianaequitybrokers' ||
     arg === 'synergybb' ||
-    arg === 'inbargroup'
+    arg === 'inbargroup' ||
+    arg === 'tworld'
   ) {
     // Sources scope
     let sources: Source[];
@@ -131,7 +134,8 @@ async function main() {
     else if (arg === 'indianaequitybrokers') sources = ['indianaequitybrokers'];
     else if (arg === 'synergybb') sources = ['synergybb'];
     else if (arg === 'inbargroup') sources = ['inbargroup'];
-    else sources = ['flippa', 'indianaequitybrokers', 'synergybb', 'inbargroup']; // all + pipeline
+    else if (arg === 'tworld') sources = ['tworld'];
+    else sources = ['flippa', 'indianaequitybrokers', 'synergybb', 'inbargroup', 'tworld']; // all + pipeline
     for (const src of sources) {
       const { ok } = await runOne(src);
       if (!ok) anyFailed = true;
